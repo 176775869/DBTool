@@ -364,10 +364,15 @@ var DoubaoWorkbench = (function() {
         var input = document.getElementById('chat-input');
         var msg = input.value.trim();
         if (!msg) return;
+
         var messagesDiv = document.getElementById('chat-messages');
-        messagesDiv.innerHTML += '<div class="chat-message user">' + escapeHtml(msg) + '</div>';
+        // 显示用户消息
+        var userMsgDiv = document.createElement('div');
+        userMsgDiv.className = 'chat-message user';
+        userMsgDiv.innerHTML = escapeHtml(msg);
+        messagesDiv.appendChild(userMsgDiv);
         input.value = '';
-        chatHistory.push({role:'user', content:msg});
+        chatHistory.push({ role: 'user', content: msg });
 
         // 创建 AI 消息容器
         var aiMsgDiv = document.createElement('div');
@@ -403,24 +408,32 @@ var DoubaoWorkbench = (function() {
                             let json = JSON.parse(data);
                             if (json.chunk) {
                                 fullReply += json.chunk;
-                                aiMsgDiv.textContent = fullReply;
+                                // 🔥 流式渲染 Markdown（实时排版）
+                                if (typeof marked !== 'undefined') {
+                                    aiMsgDiv.innerHTML = marked.parse(fullReply);
+                                } else {
+                                    aiMsgDiv.textContent = fullReply;
+                                }
                                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
                             }
-                        } catch(e) {}
+                        } catch (e) {
+                            // 忽略解析错误
+                        }
                     }
                 }
             }
 
-            // 最终渲染 Markdown
+            // 最终渲染（收尾）
             if (typeof marked !== 'undefined') {
                 aiMsgDiv.innerHTML = marked.parse(fullReply);
             } else {
                 aiMsgDiv.innerHTML = fullReply.replace(/\n/g, '<br>');
             }
-            chatHistory.push({role:'assistant', content: fullReply});
+            chatHistory.push({ role: 'assistant', content: fullReply });
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        } catch(e) {
+        } catch (e) {
             aiMsgDiv.textContent = '❌ 出错: ' + e.message;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
     }
 

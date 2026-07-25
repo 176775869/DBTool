@@ -10,6 +10,7 @@ from datetime import datetime
 
 MEMORY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'shared_context.json')
 DEFAULT_MAX_MEMORY = 40
+DEFAULT_MODEL = 'deepseek-v4-flash'  # 或 'deepseek-v4-pro'
 
 REPLAY_SUMMARY_PATTERNS = {
     'market_phase': r'(?:市场环境等级|market_phase)[：:]\s*[**]*([^\s，,\n]+)',
@@ -118,7 +119,7 @@ def call_with_memory(scene, user_content, temperature=0.1, max_tokens=8192,
             'https://api.deepseek.com/chat/completions',
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
             json={
-                'model': 'deepseek-chat',
+                'model': DEFAULT_MODEL,
                 'messages': messages,
                 'temperature': temp,
                 'max_tokens': tokens,
@@ -198,7 +199,7 @@ def call_with_memory_stream(scene, user_content, temperature=0.1, max_tokens=819
         resp = req.post('https://api.deepseek.com/chat/completions',
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
             json={
-                'model': 'deepseek-chat',
+                'model': DEFAULT_MODEL,
                 'messages': messages,
                 'temperature': temp,
                 'max_tokens': tokens,
