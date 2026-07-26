@@ -414,7 +414,7 @@ var DoubaoWorkbench = (function() {
                                 } else {
                                     aiMsgDiv.textContent = fullReply;
                                 }
-                                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                            //    messagesDiv.scrollTop = messagesDiv.scrollHeight;
                             }
                         } catch (e) {
                             // 忽略解析错误
@@ -430,7 +430,7 @@ var DoubaoWorkbench = (function() {
                 aiMsgDiv.innerHTML = fullReply.replace(/\n/g, '<br>');
             }
             chatHistory.push({ role: 'assistant', content: fullReply });
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        //    messagesDiv.scrollTop = messagesDiv.scrollHeight;
         } catch (e) {
             aiMsgDiv.textContent = '❌ 出错: ' + e.message;
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
