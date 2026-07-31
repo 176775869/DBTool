@@ -31,16 +31,19 @@ def run_collector(script_name, force=False):
     if not os.path.exists(path):
         return False
     try:
-        result = subprocess.run(['python', path], cwd=BASE_DIR, capture_output=True, encoding='utf-8', timeout=60)
+        # 超时从60秒改为30秒，避免长时间阻塞
+        result = subprocess.run(['python', path], cwd=BASE_DIR, capture_output=True, encoding='utf-8', timeout=30)
         if result.returncode != 0:
             logging.error(f'{script_name} 失败: {result.stderr.strip()}')
             return False
         logging.info(f'采集完成: {script_name}')
         return True
+    except subprocess.TimeoutExpired:
+        logging.warning(f'{script_name} 超时(30s)，跳过')
+        return False
     except Exception as e:
         logging.error(f'{script_name} 异常: {e}')
         return False
-
 # ensure_data_files 已废弃，采集调度由 collector_scheduler.should_collect 接管
 
 class ReplayHandler(SimpleHTTPRequestHandler):

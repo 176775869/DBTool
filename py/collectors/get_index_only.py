@@ -6,11 +6,10 @@ import os
 from datetime import datetime
 
 def get_output_path(filename):
-    """获取文件保存路径：与脚本同目录"""
     script_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
     return os.path.join(script_dir, filename)
 
-def get_index_quotes():
+def get_index_quotes(max_retries=3):
     url = ("http://push2.eastmoney.com/api/qt/ulist.np/get?"
            "fltt=2&secids=1.000001,0.399001,0.399006"
            "&fields=f2,f3,f4,f6,f14,f15,f16,f17,f18,f20,f21,f104,f105"
@@ -19,7 +18,7 @@ def get_index_quotes():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.79 Safari/537.36',
         'Referer': 'https://quote.eastmoney.com/',
     }
-    while True:
+    for attempt in range(max_retries):
         try:
             resp = requests.get(url, headers=headers, timeout=5)
             resp.encoding = 'utf-8'
@@ -27,11 +26,15 @@ def get_index_quotes():
                 data = json.loads(resp.text)
                 if data.get('data') and data['data'].get('diff'):
                     return data['data']['diff']
+            print(f"第{attempt+1}次尝试：API返回数据为空")
         except Exception as e:
-            print(f"获取指数失败: {e}，2秒后重试...")
+            print(f"第{attempt+1}次尝试失败: {e}")
+        if attempt < max_retries - 1:
             time.sleep(2)
+    print("获取指数失败：已达最大重试次数")
+    return None
 
-def get_index_daily_kline(secid='1.000001', days=25):
+def get_index_daily_kline(secid='1.000001', days=25, max_retries=3):
     url = (f"https://push2his.eastmoney.com/api/qt/stock/kline/get?"
            f"secid={secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57"
            f"&klt=101&fqt=0&end=20500101&lmt={days}"
@@ -40,7 +43,7 @@ def get_index_daily_kline(secid='1.000001', days=25):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.79 Safari/537.36',
         'Referer': 'https://quote.eastmoney.com/',
     }
-    while True:
+    for attempt in range(max_retries):
         try:
             resp = requests.get(url, headers=headers, timeout=5)
             resp.encoding = 'utf-8'
@@ -49,16 +52,20 @@ def get_index_daily_kline(secid='1.000001', days=25):
                 klines = data['data']['klines']
                 closes = [float(line.split(',')[2]) for line in klines]
                 return closes
+            print(f"第{attempt+1}次尝试：K线数据为空")
         except Exception as e:
-            print(f"获取指数K线失败: {e}，2秒后重试...")
+            print(f"第{attempt+1}次尝试失败: {e}")
+        if attempt < max_retries - 1:
             time.sleep(2)
+    print("获取指数K线失败：已达最大重试次数")
+    return None
 
 if __name__ == '__main__':
     print("正在获取指数实时行情...")
     index_list = get_index_quotes()
     if not index_list:
-        print("获取失败")
-        exit()
+        print("获取失败，退出")
+        exit(1)
     
     index_dict = {}
     for item in index_list:
@@ -71,16 +78,18 @@ if __name__ == '__main__':
             '最低': item.get('f16', 0),
             '今开': item.get('f17', 0),
             '昨收': item.get('f18', 0),
-            # 保留原始涨跌家数，用于加总
             '上涨': item.get('f104', 0) if item.get('f104') is not None else 0,
             '下跌': item.get('f105', 0) if item.get('f105') is not None else 0,
         }
     
     print("正在计算20日均线...")
     sh_closes = get_index_daily_kline('1.000001', 25)
-    ma20 = round(sum(sh_closes[-20:]) / 20, 2) if len(sh_closes) >= 20 else sh_closes[-1]
+    if sh_closes is None or len(sh_closes) < 20:
+        print("无法获取完整K线，使用现有数据")
+        ma20 = sh_closes[-1] if sh_closes else 0
+    else:
+        ma20 = round(sum(sh_closes[-20:]) / 20, 2)
     
-    # 沪深两市涨跌家数相加（上证 + 深证成指）
     sh_up = index_dict.get('上证指数', {}).get('上涨', 0)
     sh_down = index_dict.get('上证指数', {}).get('下跌', 0)
     sz_up = index_dict.get('深证成指', {}).get('上涨', 0)
