@@ -67,10 +67,10 @@ var DoubaoWorkbench = (function() {
 						<button class="btn-generate" id="btn-toggle-monitor" style="background:#27ae60;">🔴 自动监控</button>
 						<button class="btn-generate" id="btn-manual-check" style="background:#666;">🔄 手动刷新</button>
 						<select id="monitor-interval" style="margin-left:6px; padding:6px; border-radius:4px; border:1px solid #ccc;">
-							<option value="30000">30秒</option>
 							<option value="120000" selected>2分钟</option>
 							<option value="300000">5分钟</option>
-							<option value="600000">10分钟</option>
+							<option value="600000" selected>10分钟</option>
+							<option value="900000">15分钟</option>
 						</select>
 						<span id="monitor-timestamp" style="margin-left:10px; font-size:12px; color:#555;"></span>
 					</div>
@@ -360,82 +360,105 @@ var DoubaoWorkbench = (function() {
     }
 
     var chatHistory = [];
-    async function sendChat() {
-        var input = document.getElementById('chat-input');
-        var msg = input.value.trim();
-        if (!msg) return;
+	async function sendChat() {
+		var input = document.getElementById('chat-input');
+		var msg = input.value.trim();
+		if (!msg) return;
 
-        var messagesDiv = document.getElementById('chat-messages');
-        // 显示用户消息
-        var userMsgDiv = document.createElement('div');
-        userMsgDiv.className = 'chat-message user';
-        userMsgDiv.innerHTML = escapeHtml(msg);
-        messagesDiv.appendChild(userMsgDiv);
-        input.value = '';
-        chatHistory.push({ role: 'user', content: msg });
+		var messagesDiv = document.getElementById('chat-messages');
 
-        // 创建 AI 消息容器
-        var aiMsgDiv = document.createElement('div');
-        aiMsgDiv.className = 'chat-message ai';
-        aiMsgDiv.textContent = '';
-        messagesDiv.appendChild(aiMsgDiv);
-        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+		// 用户发送新消息时，强制开启自动滚动
+		if (typeof window.autoScrollEnabled === 'undefined') {
+			window.autoScrollEnabled = true;
+		}
+		window.autoScrollEnabled = true;
 
-        try {
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: msg, history: chatHistory.slice(-6), stream: true })
-            });
-            if (!response.ok) throw new Error('请求失败');
+		// 显示用户消息
+		var userMsgDiv = document.createElement('div');
+		userMsgDiv.className = 'chat-message user';
+		userMsgDiv.innerHTML = escapeHtml(msg);
+		messagesDiv.appendChild(userMsgDiv);
+		input.value = '';
+		chatHistory.push({ role: 'user', content: msg });
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder('utf-8');
-            let fullReply = '';
-            let buffer = '';
+		// 绑定滚动监听（仅一次）
+		if (!messagesDiv._scrollBound) {
+			messagesDiv.addEventListener('scroll', function() {
+				var threshold = 10;
+				var atBottom = (this.scrollHeight - this.scrollTop - this.clientHeight) < threshold;
+				window.autoScrollEnabled = atBottom;
+			});
+			messagesDiv._scrollBound = true;
+		}
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                let lines = buffer.split('\n');
-                buffer = lines.pop();
-                for (let line of lines) {
-                    if (line.startsWith('data: ')) {
-                        let data = line.slice(6);
-                        if (data === '[DONE]') continue;
-                        try {
-                            let json = JSON.parse(data);
-                            if (json.chunk) {
-                                fullReply += json.chunk;
-                                // 🔥 流式渲染 Markdown（实时排版）
-                                if (typeof marked !== 'undefined') {
-                                    aiMsgDiv.innerHTML = marked.parse(fullReply);
-                                } else {
-                                    aiMsgDiv.textContent = fullReply;
-                                }
-                            //    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                            }
-                        } catch (e) {
-                            // 忽略解析错误
-                        }
-                    }
-                }
-            }
+		// 创建 AI 消息容器
+		var aiMsgDiv = document.createElement('div');
+		aiMsgDiv.className = 'chat-message ai';
+		aiMsgDiv.textContent = '';
+		messagesDiv.appendChild(aiMsgDiv);
+		messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-            // 最终渲染（收尾）
-            if (typeof marked !== 'undefined') {
-                aiMsgDiv.innerHTML = marked.parse(fullReply);
-            } else {
-                aiMsgDiv.innerHTML = fullReply.replace(/\n/g, '<br>');
-            }
-            chatHistory.push({ role: 'assistant', content: fullReply });
-        //    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        } catch (e) {
-            aiMsgDiv.textContent = '❌ 出错: ' + e.message;
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-    }
+		try {
+			const response = await fetch('/api/chat', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ message: msg, history: chatHistory.slice(-6), stream: true })
+			});
+			if (!response.ok) throw new Error('请求失败');
+
+			const reader = response.body.getReader();
+			const decoder = new TextDecoder('utf-8');
+			let fullReply = '';
+			let buffer = '';
+
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buffer += decoder.decode(value, { stream: true });
+				let lines = buffer.split('\n');
+				buffer = lines.pop();
+				for (let line of lines) {
+					if (line.startsWith('data: ')) {
+						let data = line.slice(6);
+						if (data === '[DONE]') continue;
+						try {
+							let json = JSON.parse(data);
+							if (json.chunk) {
+								fullReply += json.chunk;
+								if (typeof marked !== 'undefined') {
+									aiMsgDiv.innerHTML = marked.parse(fullReply);
+								} else {
+									aiMsgDiv.textContent = fullReply;
+								}
+								// 仅当自动滚动开启时，才滚动到底部
+								if (window.autoScrollEnabled) {
+									messagesDiv.scrollTop = messagesDiv.scrollHeight;
+								}
+							}
+						} catch (e) { /* 忽略解析错误 */ }
+					}
+				}
+			}
+
+			// 最终渲染
+			if (typeof marked !== 'undefined') {
+				aiMsgDiv.innerHTML = marked.parse(fullReply);
+			} else {
+				aiMsgDiv.innerHTML = fullReply.replace(/\n/g, '<br>');
+			}
+			if (window.autoScrollEnabled) {
+				messagesDiv.scrollTop = messagesDiv.scrollHeight;
+			}
+
+			chatHistory.push({ role: 'assistant', content: fullReply });
+
+		} catch (e) {
+			aiMsgDiv.textContent = '❌ 出错: ' + e.message;
+			if (window.autoScrollEnabled) {
+				messagesDiv.scrollTop = messagesDiv.scrollHeight;
+			}
+		}
+	}
 
     // 辅助函数：转义 HTML 防止 XSS
     function escapeHtml(str) {
