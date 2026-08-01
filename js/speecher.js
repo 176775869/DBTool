@@ -31,7 +31,7 @@ var speecher = (function() {
 		// 创建一个SpeechSynthesisUtterance对象  
 		var utterance = new SpeechSynthesisUtterance();
 		// 设置语音合成的语速  
-		utterance.rate = 0.8; // 0.5表示正常语速，可以设置为0.1到10之间的值 
+		utterance.rate = 1.5; // 0.5表示正常语速，可以设置为0.1到10之间的值 
 		// 设置语音合成的音调  
 		utterance.pitch = 2; // 1表示正常音调，可以设置为0到2之间的值  
 		// 设置语音合成的音量  

@@ -125,7 +125,8 @@ def call_with_memory(scene, user_content, temperature=0.1, max_tokens=8192,
                 'max_tokens': tokens,
                 'top_p': top_p_val,
                 'frequency_penalty': freq_pen,
-                'presence_penalty': pres_pen
+                'presence_penalty': pres_pen,
+                'thinking': {'type': 'disabled'}
             },
             timeout=300
         )
@@ -133,6 +134,19 @@ def call_with_memory(scene, user_content, temperature=0.1, max_tokens=8192,
             return f"API 调用失败: {resp.text[:200]}"
 
         result = resp.json()
+        
+        # ---------- 新增诊断日志 ----------
+        finish_reason = result['choices'][0].get('finish_reason')
+        usage = result.get('usage', {})
+        print(f"[API-DEBUG] finish_reason: {finish_reason}")
+        print(f"[API-DEBUG] usage: {usage}")
+        print(f"[API-DEBUG] 返回内容长度: {len(result['choices'][0]['message']['content'])} 字符")
+        if finish_reason == 'length':
+            print("[⚠️ 截断警告] 输出因 max_tokens 限制被截断！")
+        elif finish_reason == 'content_filter':
+            print("[🚫 内容过滤] 输出被安全策略屏蔽，可能返回空。")
+        # ----------------------------------
+        
         ai_reply = result['choices'][0]['message']['content']
 
         if use_memory:
@@ -206,6 +220,7 @@ def call_with_memory_stream(scene, user_content, temperature=0.1, max_tokens=819
                 'top_p': top_p_val,
                 'frequency_penalty': freq_pen,
                 'presence_penalty': pres_pen,
+                'thinking': {'type': 'disabled'},
                 'stream': True
             },
             stream=True,

@@ -3,6 +3,12 @@ prompt_builder.py - 读取 feed_config.json，按场景拼接投喂内容
 支持进化笔记自动注入，支持策略历史加载，支持多目录搜索
 System Prompt 包含角色设定、规则、数据、策略快照、系统提示、盘中时间等所有背景上下文
 User Prompt 仅包含场景指令和用户自定义指令
+
+改进点：
+- 增强文件路径解析，优先从项目根目录搜索
+- 详细的调试日志，打印每个文件加载状态和大小
+- 健壮的错误处理，避免因单个文件缺失导致整体崩溃
+- 数据截断按配置生效
 """
 import os
 import glob
@@ -10,13 +16,21 @@ import json
 import requests
 from datetime import datetime
 
+# ---------- 常量 ----------
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), '..', 'config')
 CONFIG_PATH = os.path.join(CONFIG_DIR, 'feed_config.json')
 EVOLUTION_LOG_PATH = os.path.join(CONFIG_DIR, 'evolution_log.txt')
 MAX_EVOLUTION_ITEMS = 15
-DATA_SEARCH_DIRS = ['py/data', 'py/collectors', '.']
 
-# 数据文件语义标签（帮助AI识别数据内容）
+# 项目根目录（假设 prompt_builder.py 在 py/core/ 下）
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+DATA_SEARCH_DIRS = [
+    os.path.join(PROJECT_ROOT, 'py', 'data'),
+    os.path.join(PROJECT_ROOT, 'py', 'collectors'),
+    PROJECT_ROOT,
+]
+
+# 数据文件语义标签
 DATA_LABELS = {
     'index_data': '【大盘指数数据】',
     'limit_up': '【涨停个股数据】',
@@ -32,12 +46,7 @@ DATA_LABELS = {
     'strategy': '【历史策略快照】',
 }
 
-def get_label(filename):
-    for key, label in DATA_LABELS.items():
-        if key in filename:
-            return label
-    return ''
-
+# ---------- 辅助函数 ----------
 def load_config():
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         return json.load(f)
@@ -47,14 +56,10 @@ def load_holidays():
     config_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
     cal_path = os.path.join(config_dir, 'trade_calendar.json')
     holidays_set = set()
-    
-    # 1. 尝试从网络获取（timor.tech 免费假期 API）
     try:
         current_year = datetime.now().year
-        # 获取当前年份和前一年（覆盖跨年，如 2026-01-01 需要 2026 年数据，而 2025-12-31 需要 2025 年数据）
         years_to_fetch = [current_year, current_year - 1]
         all_holidays = {}
-        
         for year in years_to_fetch:
             url = f"https://timor.tech/api/holiday/year/{year}"
             resp = requests.get(url, timeout=5)
@@ -62,11 +67,8 @@ def load_holidays():
                 data = resp.json()
                 if data.get('code') == 0:
                     holiday_dict = data.get('holiday', {})
-                    # holiday_dict 的 key 是日期字符串，如 '2026-01-01'
                     all_holidays.update(holiday_dict)
-        
         if all_holidays:
-            # 网络获取成功，更新本地缓存文件
             os.makedirs(config_dir, exist_ok=True)
             with open(cal_path, 'w', encoding='utf-8') as f:
                 json.dump({'holidays': sorted(all_holidays.keys())}, f, ensure_ascii=False, indent=2)
@@ -75,7 +77,6 @@ def load_holidays():
     except Exception as e:
         print(f"[PROMPT] 网络获取假期失败: {e}，尝试读取本地缓存...")
 
-    # 2. 网络失败，从本地 config 目录读取
     if os.path.exists(cal_path):
         try:
             with open(cal_path, 'r', encoding='utf-8') as f:
@@ -86,8 +87,7 @@ def load_holidays():
             print(f"[PROMPT] 读取本地假期文件失败: {e}")
             return set()
     else:
-        print("[PROMPT] 本地假期文件不存在，且网络获取失败，将不使用假期判断（默认所有工作日均为交易日）")
-    
+        print("[PROMPT] 本地假期文件不存在，且网络获取失败，将不使用假期判断")
     return holidays_set
 
 def is_trade_day(dt, holidays_set):
@@ -133,21 +133,42 @@ def load_evolution_notes():
         return ""
     return "【历史经验教训（AI 过去犯过的错，本次必须避免）】\n" + "".join(recent)
 
+def get_label(filename):
+    for key, label in DATA_LABELS.items():
+        if key in filename:
+            return label
+    return ''
+
 def resolve_file(file_ref, base_dir, max_limit=0, max_qs=0, max_limit_down=0, max_zhaban=0):
+    """
+    解析文件引用，支持 AUTO_LATEST: 模式自动查找最新文件，并支持按配置截断行数
+    返回 (内容, 文件路径)
+    """
     if file_ref.startswith('AUTO_LATEST:'):
         pattern = file_ref[len('AUTO_LATEST:'):]
+        # 在所有搜索路径中查找匹配文件
         found = []
         for d in DATA_SEARCH_DIRS:
-            found.extend(glob.glob(os.path.join(base_dir, d, os.path.basename(pattern))))
+            full_pattern = os.path.join(d, pattern)
+            matches = glob.glob(full_pattern)
+            found.extend(matches)
         if not found:
-            tried = [os.path.join(base_dir, d, os.path.basename(pattern)) for d in DATA_SEARCH_DIRS]
-            raise FileNotFoundError(f"找不到匹配文件：{pattern}。搜索路径：{tried}")
-        latest = sorted(found)[-1]
-        print(f"[PROMPT] 加载文件: {os.path.basename(latest)}")
+            # 额外尝试：直接以 base_dir 为根（兼容旧逻辑）
+            full_pattern = os.path.join(base_dir, pattern)
+            matches = glob.glob(full_pattern)
+            found.extend(matches)
+
+        if not found:
+            print(f"[PROMPT] 警告：未找到匹配文件 {pattern}，搜索路径: {DATA_SEARCH_DIRS}")
+            return "", None
+
+        # 按修改时间排序，取最新
+        latest = max(found, key=os.path.getmtime)
+        print(f"[PROMPT] 加载文件: {os.path.basename(latest)} (大小 {os.path.getsize(latest)} 字节)")
         with open(latest, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        # 根据文件类型和配置截断
+        # 根据文件类型和配置截断行数
         basename = os.path.basename(latest)
         max_items = None
         if 'limit_down' in basename:
@@ -163,32 +184,45 @@ def resolve_file(file_ref, base_dir, max_limit=0, max_qs=0, max_limit_down=0, ma
             lines = content.split('\n')
             header_end = 0
             for i, line in enumerate(lines):
-                if line.startswith('序号'):
+                if line.startswith('序号') or line.startswith('排名'):
                     header_end = i + 1
                     break
             if header_end > 0:
-                content = '\n'.join(lines[:header_end + max_items])
-
+                truncated = '\n'.join(lines[:header_end + max_items])
+                print(f"[PROMPT] 截断 {basename} 至 {max_items} 行（原 {len(lines)} 行）")
+                content = truncated
         return content, latest
     else:
+        # 普通相对路径，尝试在 base_dir 下查找
         path = os.path.join(base_dir, file_ref)
         if not os.path.exists(path):
-            raise FileNotFoundError(f'File not found: {path}')
+            # 也尝试在项目根目录下查找
+            alt_path = os.path.join(PROJECT_ROOT, file_ref)
+            if os.path.exists(alt_path):
+                path = alt_path
+            else:
+                print(f"[PROMPT] 警告：文件不存在 {file_ref}")
+                return "", None
         with open(path, 'r', encoding='utf-8') as f:
-            return f.read(), path
+            content = f.read()
+        return content, path
 
 def build_prompt(scene='replay', extra_note=None):
+    """
+    构建 system_prompt 和 user_prompt
+    返回 (system_prompt, user_prompt)
+    """
     config = load_config()
     sc = config[scene]
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    base_dir = PROJECT_ROOT  # 以项目根目录为基准
 
-    # ---- 构建用户指令（纯指令，不含任何背景上下文） ----
-    user_instruction = sc['prompt_intro'] + '\n\n'
+    # ---- 用户指令（纯指令） ----
+    user_instruction = sc.get('prompt_intro', '') + '\n\n'
     if extra_note:
         user_instruction += f"【用户额外指令（必须严格执行）】{extra_note}\n\n"
         save_evolution_note(extra_note)
 
-    # ---- 构建 System Prompt（角色设定 + 系统提示 + 所有预加载数据） ----
+    # ---- 构建 System Prompt ----
     system_prompt = sc.get('system_prompt', '')
     system_prompt += '\n\n' + get_system_note()
 
@@ -218,41 +252,51 @@ def build_prompt(scene='replay', extra_note=None):
         # 历史策略快照
         history_days = sc.get('strategy_history_days', 0)
         if history_days > 0:
-            strategy_pattern = os.path.join(base_dir, 'strategy_*.md')
+            strategy_pattern = os.path.join(PROJECT_ROOT, 'strategy_*.md')
             all_strategy_files = sorted(glob.glob(strategy_pattern), key=os.path.getmtime, reverse=True)
             for sf in all_strategy_files[:history_days]:
                 with open(sf, 'r', encoding='utf-8') as f:
-                    preload_parts.append(f"--- 策略快照：{os.path.basename(sf)} ---\n{f.read()}\n")
+                    content = f.read()
+                    preload_parts.append(f"--- 策略快照：{os.path.basename(sf)} ---\n{content}\n")
 
-    # 所有配置文件中的文件（规则、数据等）
-    for fr in sc['files']:
-        try:
-            content, res = resolve_file(
-                fr, base_dir,
-                max_limit=sc.get('max_limit_up', 0),
-                max_qs=sc.get('max_qs_pool', 0),
-                max_limit_down=sc.get('max_limit_down', 0),
-                max_zhaban=sc.get('max_zhaban', 0)
-            )
-        except FileNotFoundError as e:
-            if 'anchor_history' in str(e):
-                continue
-            raise
-        label = get_label(os.path.basename(res))
+    # 加载配置文件中的所有文件
+    for fr in sc.get('files', []):
+        content, fpath = resolve_file(
+            fr, base_dir,
+            max_limit=sc.get('max_limit_up', 0),
+            max_qs=sc.get('max_qs_pool', 0),
+            max_limit_down=sc.get('max_limit_down', 0),
+            max_zhaban=sc.get('max_zhaban', 0)
+        )
+        if content is None or fpath is None:
+            continue  # 文件缺失，跳过
+        label = get_label(os.path.basename(fpath))
         if label:
             preload_parts.append(f"{label}\n---\n{content}")
         else:
-            preload_parts.append(f"--- 文件：{os.path.basename(res)} ---\n{content}")
+            preload_parts.append(f"--- 文件：{os.path.basename(fpath)} ---\n{content}")
 
+    # 将所有预加载内容拼接到 system_prompt
     if preload_parts:
         system_prompt += '\n\n' + '\n\n'.join(preload_parts)
 
+    # ----- 调试信息 -----
+    print(f"[BUILD] 场景: {scene}")
+    print(f"[BUILD] system_prompt 长度: {len(system_prompt)} 字符")
+    print(f"[BUILD] user_instruction 长度: {len(user_instruction)} 字符")
+    print(f"[BUILD] system_prompt 前200字符: {system_prompt[:200].replace(chr(10), ' ')}...")
+    print(f"[BUILD] user_instruction 前200字符: {user_instruction[:200].replace(chr(10), ' ')}...")
+
     return system_prompt, user_instruction
 
-
 if __name__ == '__main__':
+    # 测试：直接运行本文件可查看生成的 prompt 预览
     sp, up = build_prompt('replay')
-    print("=== SYSTEM PROMPT (first 500 chars) ===")
+    print("\n" + "="*60)
+    print("SYSTEM PROMPT (前500字符):")
     print(sp[:500])
-    print("\n=== USER PROMPT (first 500 chars) ===")
+    print("\n" + "="*60)
+    print("USER PROMPT (前500字符):")
     print(up[:500])
+    print("\n" + "="*60)
+    print(f"总长度: system={len(sp)}, user={len(up)}")

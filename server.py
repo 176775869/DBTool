@@ -94,6 +94,8 @@ class ReplayHandler(SimpleHTTPRequestHandler):
 
         # ========== 聊天 ==========
         if self.path == '/api/chat':
+            print(" ")
+            print("[CHAT] 收到前端聊天请求")
             msg = data.get('message', '').strip()
             history = data.get('history', [])          
             use_stream = data.get('stream', False)
@@ -136,18 +138,21 @@ class ReplayHandler(SimpleHTTPRequestHandler):
                         content = f.read()
                     self.send_json(200, {'file': latest, 'content': content, 'cached': True})
                     return
-
+                    
+            print("[GENERATE] 收到前端策略请求")
             # 复盘前强制全量采集
             for s, interval in CONFIG.get('collectors', {}).items():
                 if should_collect(s, interval, force=False):
                     run_collector(s, force=True)
             # build_prompt 返回 (system_prompt, user_prompt) 元组
             prompt_tuple = build_prompt('replay', extra_note=cp)
+            print(f"[DEBUG-API] 生成策略 prompt 长度: {len(prompt_tuple[1]) if isinstance(prompt_tuple, tuple) else len(prompt_tuple)}")
             reply = call_with_memory('replay', prompt_tuple,
                           use_memory=CONFIG.get('replay', {}).get('use_shared_memory', True),
                           max_memory_items=CONFIG.get('replay', {}).get('max_memory_items', 40),
                           memory_content=cp if cp else '自动复盘',
                           history=None)
+            print(f"[DEBUG-API] 最终回复总长度: {len(reply)} 字符")
             print(f"[Token] 复盘 | 用户 {len(prompt_tuple[1]) if isinstance(prompt_tuple, tuple) else len(prompt_tuple)}字符")
 
             today = datetime.now().strftime('%Y%m%d')
@@ -160,6 +165,7 @@ class ReplayHandler(SimpleHTTPRequestHandler):
 
         # ========== 监控 ==========
         if self.path == '/api/monitor':
+            print(" ")
             print("[MONITOR] 收到前端监控请求")
             try:
                 for s, interval in CONFIG.get('collectors', {}).items():
