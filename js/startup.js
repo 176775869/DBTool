@@ -1,6 +1,8 @@
 var startup = (function(text) {
 	var startTime;
 	var isOnline = window.location.protocol !== 'file:';   // 新增
+	var loadedYear = null;// 新增变量记录当前加载的年份
+	var eventsBound = false;  // 事件绑定标记
 
 	var displayAI = function (recommend) {
 		var oDiv = document.getElementById("AI");
@@ -113,7 +115,7 @@ var startup = (function(text) {
 	var init = function() {
 		var dateArr = workbook.getDateArr(()=> {}, '-');
 		$('#date').val(dateArr[dateArr.length - 1]);
-		document.getElementById('date').min = dateArr[0];
+		//document.getElementById('date').min = dateArr[0];
 		document.getElementById('mode').disabled = true;
 		if(Configure.getMode() == Configure.modeType.DP) {
 			document.getElementById('pre').disabled = true;
@@ -144,8 +146,37 @@ var startup = (function(text) {
 			rtSpirit.init();
 		}
 	};
+	// 提取加载函数
+	var loadWorkbook = function(year) {
+		var url = year ? '/api/workbook?year=' + year : '/api/workbook';
+		document.querySelector('.loader-container').style.display = 'block';
+		fetch(url)
+			.then(function(resp) {
+				if (!resp.ok) throw new Error('HTTP ' + resp.status);
+				return resp.arrayBuffer();
+			})
+			.then(function(buffer) {
+				var data = new Uint8Array(buffer);
+				var arr = [];
+				for (var i = 0; i < data.length; i++) {
+					arr.push(String.fromCharCode(data[i]));
+				}
+				var binaryStr = arr.join('');
+				// 停止旧定时器（如果有）
+				requests.stop();
+				Timer.stop && Timer.stop();
+				// 执行加载完成逻辑（即原来的 loadExcelDone 内容，但需要重置状态）
+				loadExcelDone(binaryStr);
+			})
+			.catch(function(err) {
+				console.error('加载 workbook 失败:', err);
+				document.querySelector('.loader-container').style.display = 'none';
+			});
+	}
 
 	var addEvent = function() {
+		if (eventsBound) return;
+		eventsBound = true;
 		var formUpdate = function() {
 			drawCanvasLeft();
 			if (document.getElementById('showdays').value < 120) {
@@ -174,11 +205,19 @@ var startup = (function(text) {
 		});
 
 		var dateChange = function(e) {
-			Configure.date = new Date($('#date')[0].value);
-			canvas.reload();
-			table.updateForm();
-			formUpdate();
-			displayAI(AI.getRecommend());
+			var newDate = $('#date')[0].value;
+			Configure.date = new Date(newDate);
+			var newYear = newDate.split('-')[0]; // 提取年份
+			if (newYear !== loadedYear) {
+				loadWorkbook(newYear);
+				loadedYear = newYear;
+			} else {
+				// 年份相同，只刷新视图
+				canvas.reload();
+				table.updateForm();
+				formUpdate();
+				displayAI(AI.getRecommend());
+			}
 		}
 
 		var dateOnclick = function(e) {
@@ -270,7 +309,7 @@ var startup = (function(text) {
 			startRequests();
 			Configure.Debug("Init done: " + (window.performance.now() - startTime) + "ms");
 			document.querySelector('.loader-container').style.display = 'none';
-			updateTitle(Configure.getMode() == 0 ? 'fp' : 'dp');
+			//updateTitle(Configure.getMode() == 0 ? 'fp' : 'dp');
 
 			// 在线模式下，表格和表单初始隐藏，Excel加载后显示
 			if (isOnline) {
@@ -314,43 +353,19 @@ var startup = (function(text) {
 		});
 
 		window.onload = function(){
-			// 在线模式自动从服务端加载 Excel 文件
-			if (isOnline) {
-				console.log('[WORKBOOK] 在线模式，开始自动加载 Excel...');
-				document.querySelector('.loader-container').style.display = 'block';
-				fetch('/api/workbook')
-					.then(function(resp) {
-						console.log('[WORKBOOK] 收到响应, status:', resp.status, 'content-length:', resp.headers.get('content-length'));
-						if (!resp.ok) throw new Error('HTTP ' + resp.status);
-						return resp.arrayBuffer();
-					})
-					.then(function(buffer) {
-						console.log('[WORKBOOK] buffer 大小:', buffer.byteLength, '字节');
-						startTime = window.performance.now();
-						var data = new Uint8Array(buffer);
-						var arr = [];
-						for (var i = 0; i < data.length; i++) {
-							arr.push(String.fromCharCode(data[i]));
-						}
-						var binaryStr = arr.join('');
-						console.log('[WORKBOOK] 转二进制字符串长度:', binaryStr.length);
-						console.log('[WORKBOOK] 前20字符:', binaryStr.substring(0, 20));
-						updateTitle('auto');
-						loadExcelDone(binaryStr);
-					})
-					.catch(function(err) {
-						console.log('[WORKBOOK] 自动加载失败:', err.message);
-						document.querySelector('.loader-container').style.display = 'none';
-					});
-			}
 			updateTitle(Configure.version);
 			$('#date').val(Configure.getDateStr(Configure.date, '-'));
 			$('#rtShowdays').val(Configure.RT_canvas_show_days_num/2);
-
-			// 在线模式：初始隐藏表格和表单，等待Excel加载后显示
+			
+			// 在线模式自动从服务端加载 Excel 文件
 			if (isOnline) {
+				console.log('[WORKBOOK] 在线模式，开始自动加载 Excel...');
+				loadedYear = '' + Configure.date.getFullYear();
+				loadWorkbook(loadedYear);
+				
 				$('#tbl, #form1, #form2, #form3').hide();
                 var excelInput = document.getElementById('excel-file');
+				document.getElementById('rtShowdays').disabled = true;
                 if (excelInput) {
                     excelInput.disabled = true;
                     excelInput.title = '在线模式，文件自动加载';

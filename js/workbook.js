@@ -4,9 +4,15 @@
 	// 生成动作很耗时 cache一下
 	var BandTicketsCache = [];
 	var SheetCache = {};  // 存储要使用的表
+	
+	var clear = function() {
+		BandTicketsCache = [];
+		SheetCache = {}; 
+	};
 		
 	var Book = function(b){
-		Book = b
+		Book = b;
+		clear();
 	};
 	var sheetExist = function(name) {
 		return Book.Sheets.hasOwnProperty(name) || 
