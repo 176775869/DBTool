@@ -1,4 +1,5 @@
 {
+  "use_tushare": false,
   "collectors": {
     "get_index_only.py": 30,
     "get_limit_up.py": 60,

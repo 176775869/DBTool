@@ -17,34 +17,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(BASE_DIR, 'py', 'core'))
 from prompt_builder import build_prompt
 from memory_manager import call_with_memory, call_with_memory_stream
-from collector_scheduler import should_collect
+from collector_scheduler import should_collect, run_collector
 
 CONFIG_PATH = os.path.join(BASE_DIR, 'py', 'config', 'feed_config.json')
 with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     CONFIG = json.load(f)
-
-# 调度由 collector_scheduler.should_collect 统一管理
-
-def run_collector(script_name, force=False):
-    """运行采集脚本，调度决策由 collector_scheduler.should_collect 控制"""
-    path = os.path.join(BASE_DIR, 'py', 'collectors', script_name)
-    if not os.path.exists(path):
-        return False
-    try:
-        # 超时从60秒改为30秒，避免长时间阻塞
-        result = subprocess.run(['python', path], cwd=BASE_DIR, capture_output=True, encoding='utf-8', timeout=30)
-        if result.returncode != 0:
-            logging.error(f'{script_name} 失败: {result.stderr.strip()}')
-            return False
-        logging.info(f'采集完成: {script_name}')
-        return True
-    except subprocess.TimeoutExpired:
-        logging.warning(f'{script_name} 超时(30s)，跳过')
-        return False
-    except Exception as e:
-        logging.error(f'{script_name} 异常: {e}')
-        return False
-# ensure_data_files 已废弃，采集调度由 collector_scheduler.should_collect 接管
 
 class ReplayHandler(SimpleHTTPRequestHandler):
     def do_GET(self):

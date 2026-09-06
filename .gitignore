@@ -46,7 +46,7 @@ py/last_strategy_date.txt
 服务器-*.vbs
 
 # ===== 投喂缓存目录 =====
-py/feeds/
+py/logs/
 py/data/feeds/
 
 # ===== 进化笔记（AI 自省记录，可选提交） =====

@@ -3,17 +3,15 @@ import sys
 import time
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv, find_dotenv
 from tu_logger import get_logger, log_result
 
-logger = get_logger('tu_get_index_only')
-
-print("=== tu_get_index_only started ===")  # 调试用，确保执行
+logger = get_logger('tu_get_top_amount')
 
 dotenv_path = find_dotenv()
 if not dotenv_path:
-    logger.error('.env file not found')
+    logger.error('.env not found')
     sys.exit(1)
 load_dotenv(dotenv_path)
 
@@ -26,23 +24,14 @@ logger.info('Token loaded (first 4 chars: %s...)', TOKEN[:4])
 
 API_URL = "http://api.tushare.pro"
 
-def fetch_index_daily(ts_code, start_date=None, end_date=None, fields=None):
+def fetch_daily_basic(trade_date, top_n=20):
     start_time = time.time()
-    params = {}
-    if ts_code:
-        params['ts_code'] = ts_code
-    if start_date:
-        params['start_date'] = start_date
-    if end_date:
-        params['end_date'] = end_date
-
     payload = {
-        "api_name": "index_daily",
+        "api_name": "daily_basic",
         "token": TOKEN,
-        "params": params,
-        "fields": fields or "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"
+        "params": {"trade_date": trade_date},
+        "fields": "ts_code,close,pct_chg,amount,circ_mv"
     }
-
     try:
         resp = requests.post(API_URL, json=payload, timeout=10)
         elapsed = time.time() - start_time
@@ -66,6 +55,8 @@ def fetch_index_daily(ts_code, start_date=None, end_date=None, fields=None):
 
     data = result.get('data', {})
     df = pd.DataFrame(data.get('items', []), columns=data.get('fields', []))
+    if not df.empty:
+        df = df.sort_values('amount', ascending=False).head(top_n)
     logger.info('Fetched %d records', len(df))
     return df, elapsed
 
@@ -75,29 +66,24 @@ def get_output_path(filename):
     return os.path.join(data_dir, filename)
 
 def main():
-    logger.info("=== tu_get_index_only main started ===")
-    end_date = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
-    start_date = (datetime.now() - timedelta(days=30)).strftime('%Y%m%d')
-    logger.info('Query range: %s to %s', start_date, end_date)
+    trade_date = datetime.now().strftime('%Y%m%d')
+    logger.info('Fetching top amount for %s', trade_date)
 
-    df, elapsed = fetch_index_daily('000001.SH', start_date, end_date)
+    df, elapsed = fetch_daily_basic(trade_date, 20)
     if df is None:
-        log_result(logger, False, 'fetch_index_daily returned None')
+        log_result(logger, False, 'fetch_daily_basic returned None')
         sys.exit(1)
     if df.empty:
-        log_result(logger, False, 'No data for 000001.SH (maybe holiday)')
+        log_result(logger, False, 'No data')
         sys.exit(1)
 
-    log_result(logger, True, f'Got {len(df)} records', len(df), elapsed)
-    today = datetime.now().strftime('%Y%m%d')
-    out_file = get_output_path(f'index_data_{today}.txt')
+    log_result(logger, True, f'Got top {len(df)} stocks', len(df), elapsed)
+
+    out_file = get_output_path(f'top_amount_data_{trade_date}.txt')
     with open(out_file, 'w', encoding='utf-8') as f:
-        f.write(f"日期: {today}\n")
-        last = df.iloc[-1]
-        f.write(f"上证指数: {last['close']:.2f}，涨跌幅 {last['pct_chg']:+.2f}%，成交额 {last['amount']/1e8:.2f}亿\n")
-        if len(df) >= 20:
-            ma20 = df['close'].tail(20).mean()
-            f.write(f"上证20日均线: {ma20:.2f}\n")
+        f.write(f"日期: {trade_date}\n全市场成交额Top20\n\n")
+        for i, row in df.iterrows():
+            f.write(f"{i+1}. {row['ts_code'][:8]}: {row['pct_chg']:.2f}% 成交{row['amount']/1e8:.1f}亿 总市值{row['circ_mv']/1e8:.0f}亿\n")
     logger.info('Saved to %s', out_file)
 
 if __name__ == '__main__':
