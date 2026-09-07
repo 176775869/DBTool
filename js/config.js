@@ -595,21 +595,19 @@ var Configure = (function(){
 	var emotionProgress = '[0, 2, 4, 6, 8]';  // 9天标准周期节奏。数值T+n,分别对应启动（轮动）、分歧、确认加速、2次分歧、退潮E。
 	
 	var selectIndicators = [
-							
+								{name:'涨停背离'},
+								{name:'亏钱效应'},
 							//	{name:'全A等权'}, 
 								{name:'上证指数'}, 									
 							//	{name:'收益率%'},
-								{name:'涨停背离'},
-								{name:'涨停数量'},
-								{name:'赚钱效应'},
+							//	{name:'涨停数量'},
+							//	{name:'赚钱效应'},
 							//	{name:'连扳高度'},								
 							//	{name:'连扳数量'},
 							//	{name:'跌停数量'},
 							//	{name:'炸板数量'},
-							//	{name:'超跌数量'},
-								{name:'亏钱效应'},
+							//	{name:'超跌数量'},	
 							//	{name:'连扳背离'},
-								
 							];  
 	var isAfterNoon = function() {
 		return new Date().getHours() > 12;
